@@ -1,8 +1,8 @@
 class CodexWallpaper < Formula
   desc "Local video wallpapers and frosted glass for the Codex desktop app"
   homepage "https://github.com/TheRangerStar/codex-video-wallpaper"
-  url "https://github.com/TheRangerStar/codex-video-wallpaper/releases/download/v0.1.0/codex-video-wallpaper-0.1.0.tar.gz"
-  sha256 "490a00dd62edf5e01494327c15c64ebbaaa4d590616b131702e4a676344cef83"
+  url "https://github.com/TheRangerStar/codex-video-wallpaper/releases/download/v0.1.1/codex-video-wallpaper-0.1.1.tar.gz"
+  sha256 "cdde6f9c7aef6775691894bab45b44923a26e6a852593bd58e5d0abb2da2f29d"
   license "MIT"
 
   depends_on :macos
@@ -27,7 +27,7 @@ class CodexWallpaper < Formula
   end
 
   test do
-    assert_equal "0.1.0", shell_output("#{bin}/codex-wallpaper --version").strip
+    assert_equal "0.1.1", shell_output("#{bin}/codex-wallpaper --version").strip
     assert_match "MP4", shell_output("#{bin}/codex-wallpaper --help")
     assert_match "codex-wallpaper", shell_output("#{bin}/codex-wallpaper invalid 2>&1", 2)
   end
