@@ -1,0 +1,85 @@
+name: Validate wallpaper formula
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Compare Formula with latest stable release and downloaded assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, re, subprocess, tempfile
+          from pathlib import Path
+
+          repo = "TheRangerStar/codex-video-wallpaper"
+          formula = Path("Formula/codex-wallpaper.rb").read_text()
+          def field(name, required=True):
+              values = re.findall(rf'^\s*{name}\s+"([^"]+)"\s*$', formula, re.M)
+              if len(values) != 1 and (required or values):
+                  raise SystemExit(f"Expected exactly one Formula {name}")
+              return values[0] if values else None
+
+          url, checksum = field("url"), field("sha256")
+          match = re.fullmatch(
+              rf"https://github\.com/{re.escape(repo)}/releases/download/"
+              r"v(\d+\.\d+\.\d+)/codex-video-wallpaper-(\d+\.\d+\.\d+)\.tar\.gz", url)
+          if not match or match[1] != match[2]:
+              raise SystemExit("Formula URL must use matching tag and archive versions")
+          version, tag = match[1], f"v{match[1]}"
+          explicit_version = field("version", required=False)
+          if explicit_version is not None and explicit_version != version:
+              raise SystemExit("Explicit Formula version does not match URL")
+          test_versions = re.findall(
+              r'assert_equal\s+"([^"]+)"\s*,\s*shell_output\("[^"\n]* --version"\)\.strip',
+              formula)
+          if test_versions != [version]:
+              raise SystemExit("Formula --version test must match release version")
+          if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+              raise SystemExit("Invalid Formula SHA-256")
+          def api(path):
+              return json.loads(subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/{path}"], text=True))
+
+          latest = api("releases/latest")
+          if latest["tag_name"] != tag:
+              raise SystemExit(f"Formula {tag} is not latest stable release {latest['tag_name']}")
+          release = api(f"releases/tags/{tag}")
+          if release["tag_name"] != tag or release["draft"] or release["prerelease"]:
+              raise SystemExit("Expected a published stable release")
+          name = f"codex-video-wallpaper-{version}.tar.gz"
+          for required in (name, "SHA256SUMS"):
+              if sum(a["name"] == required and a["state"] == "uploaded"
+                     for a in release["assets"]) != 1:
+                  raise SystemExit(f"Missing or ambiguous uploaded asset: {required}")
+          asset = next(a for a in release["assets"] if a["name"] == name)
+          if asset["browser_download_url"] != url:
+              raise SystemExit("Formula URL does not match release asset")
+          with tempfile.TemporaryDirectory() as directory:
+              subprocess.run(["gh", "release", "download", tag, "--repo", repo,
+                              "--pattern", name, "--pattern", "SHA256SUMS",
+                              "--dir", directory], check=True)
+              archive = Path(directory, name)
+              digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+              if archive.stat().st_size != asset["size"]:
+                  raise SystemExit("Archive size mismatch")
+              if digest != checksum or asset.get("digest") != f"sha256:{digest}":
+                  raise SystemExit("Formula, GitHub digest and downloaded archive SHA-256 differ")
+              if Path(directory, "SHA256SUMS").read_bytes() != f"{digest}  {name}\n".encode():
+                  raise SystemExit("SHA256SUMS does not match downloaded archive")
+              print(f"Formula OK: {tag}, sha256:{digest}")
+          PY
